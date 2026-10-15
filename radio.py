@@ -8,6 +8,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import shutil
 import socket
 import subprocess
 import sys
@@ -62,6 +63,8 @@ def station_by_id(station_id):
 def ensure_player(prefs):
     if get('idle-active') is not None:
         return
+    if shutil.which('mpv') is None:
+        raise RuntimeError('mpv is not installed. Install it with your package manager (e.g. apt/dnf/pacman install mpv).')
     SOCKET.unlink(missing_ok=True)
     with (STATE / 'player.log').open('w') as log:
         subprocess.Popen(['mpv', '--no-config', '--no-video', '--idle=yes', '--terminal=no',
