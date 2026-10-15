@@ -1,0 +1,351 @@
+#!/usr/bin/env python3
+"""ABC Radio TUI: browse and play ABC live radio from the terminal."""
+import curses
+from datetime import datetime
+import locale
+import os
+from pathlib import Path
+import queue
+import subprocess
+import sys
+import threading
+import time
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import radio  # noqa: E402
+import programme as programme_source  # noqa: E402
+
+STATUS_INTERVAL = 2
+PROGRAMME_INTERVAL = 30
+VOLUME_STEP = 5
+HELP = [("↑↓", "move"), ("⏎", "play"), ("space", "pause"), ("s", "stop"),
+        ("+/-", "volume"), ("o", "open page"), ("q", "quit"), ("Q", "stop & quit")]
+
+
+class App:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.status = {}
+        self.programme = {}
+        self.error = ""
+        self.busy = False
+        self.cursor = 0
+        self.top = 0
+        self.list_rows = []
+        self.actions = queue.Queue()
+        self.wake = threading.Event()
+        self.stopped = threading.Event()
+        self.programme_due = threading.Event()
+
+    # ---- background work -------------------------------------------------
+
+    def run_action(self, action, arg=None):
+        with self.lock:
+            self.busy = True
+        self.actions.put((action, arg))
+
+    def worker(self):
+        while not self.stopped.is_set():
+            try:
+                action, arg = self.actions.get(timeout=STATUS_INTERVAL)
+            except queue.Empty:
+                action, arg = "status", None
+            try:
+                result = radio.control(action, arg)
+                with self.lock:
+                    changed = result["station"] != self.status.get("station")
+                    self.status = result
+                    if action != "status":
+                        self.error = ""
+                if changed:
+                    self.programme_due.set()
+            except Exception as exc:  # player or network problems stay on screen
+                with self.lock:
+                    self.error = str(exc) or exc.__class__.__name__
+            finally:
+                with self.lock:
+                    self.busy = not self.actions.empty()
+                self.wake.set()
+
+    def programme_worker(self):
+        while not self.stopped.is_set():
+            self.programme_due.wait(PROGRAMME_INTERVAL)
+            self.programme_due.clear()
+            with self.lock:
+                station = self.status.get("station")
+            if not station:
+                continue
+            try:
+                result = programme_source.programme(station)
+            except Exception:
+                result = {"available": False, "station": station}
+            with self.lock:
+                if result.get("station") == self.status.get("station"):
+                    self.programme = result
+            self.wake.set()
+
+    # ---- drawing ------------------------------------------------------------
+
+    @staticmethod
+    def put(win, y, x, text, attr=0):
+        height, width = win.getmaxyx()
+        if y < 0 or y >= height or x >= width:
+            return
+        text = text[: max(0, width - x - (1 if y == height - 1 else 0))]
+        try:
+            win.addstr(y, x, text, attr)
+        except curses.error:
+            pass
+
+    @staticmethod
+    def clock(iso):
+        try:
+            return datetime.fromisoformat(iso).astimezone().strftime("%-I:%M %p").lower()
+        except (TypeError, ValueError):
+            return ""
+
+    def state_text(self, status):
+        if status.get("buffering"):
+            return "… Buffering", self.c_accent
+        if status.get("playing"):
+            return "▶ Playing", self.c_play
+        if status.get("paused"):
+            return "⏸ Paused", self.c_accent
+        return "■ Stopped", self.c_dim
+
+    def draw_details(self, win, y, x, width, status, prog, compact):
+        state, attr = self.state_text(status)
+        self.put(win, y, x, status.get("name", "ABC Radio"), curses.A_BOLD)
+        self.put(win, y + 1, x, state, attr | curses.A_BOLD)
+        if compact:
+            title = prog.get("title") if prog.get("available") else "Programme information unavailable"
+            self.put(win, y + 2, x, "On air: " + (title or "…"), self.c_dim)
+            return 3
+        row = y + 3
+        self.put(win, row, x, "ON AIR NOW", self.c_accent | curses.A_BOLD)
+        row += 1
+        if prog.get("available"):
+            self.put(win, row, x, prog.get("title", ""), curses.A_BOLD)
+            row += 1
+            if prog.get("presenter"):
+                self.put(win, row, x, "with " + prog["presenter"])
+                row += 1
+            times = " – ".join(filter(None, [self.clock(prog.get("start")), self.clock(prog.get("end"))]))
+            if times:
+                self.put(win, row, x, times, self.c_dim)
+                row += 1
+        elif prog.get("station") == status.get("station"):
+            self.put(win, row, x, "Programme information unavailable", self.c_dim)
+            row += 1
+        else:
+            self.put(win, row, x, "Loading…", self.c_dim)
+            row += 1
+        row += 1
+        volume = int(status.get("volume", 0) or 0)
+        bar_width = max(5, min(20, width - 14))
+        filled = round(bar_width * volume / 100)
+        self.put(win, row, x, "Volume ")
+        self.put(win, row, x + 7, "█" * filled, self.c_accent)
+        self.put(win, row, x + 7 + filled, "░" * (bar_width - filled), self.c_dim)
+        self.put(win, row, x + 8 + bar_width, f"{volume}%")
+        return row - y + 1
+
+    def draw(self, win):
+        win.erase()
+        height, width = win.getmaxyx()
+        with self.lock:
+            status, prog, error, busy = dict(self.status), dict(self.programme), self.error, self.busy
+        stations = radio.STATIONS
+        self.cursor = max(0, min(self.cursor, len(stations) - 1))
+
+        self.put(win, 0, 1, "ABC Radio", self.c_accent | curses.A_BOLD)
+        if status:
+            state, attr = self.state_text(status)
+            right = f"{state}  ·  Vol {int(status.get('volume', 0) or 0)}%"
+            self.put(win, 0, max(12, width - len(right) - 2), right, attr)
+        self.put(win, 1, 0, "─" * width, self.c_dim)
+
+        wide = width >= 72
+        list_width = min(max(len(s["name"]) for s in stations) + 6, width // 2) if wide else width
+        body_top = 2
+        if not wide:
+            body_top += self.draw_details(win, 2, 1, width - 2, status, prog, compact=True) + 1
+        body_bottom = height - 3
+        visible = max(1, body_bottom - body_top)
+        if self.cursor < self.top:
+            self.top = self.cursor
+        elif self.cursor >= self.top + visible:
+            self.top = self.cursor - visible + 1
+        self.top = max(0, min(self.top, max(0, len(stations) - visible)))
+
+        self.list_rows = []
+        for row, index in enumerate(range(self.top, min(len(stations), self.top + visible))):
+            station = stations[index]
+            current = station["id"] == status.get("station")
+            marker = "▶" if current and status.get("playing") else ("⏸" if current and status.get("paused") else " ")
+            line = f" {marker} {station['name']}".ljust(list_width - 1)
+            attr = curses.A_REVERSE if index == self.cursor else 0
+            if current:
+                attr |= curses.A_BOLD | self.c_play
+            self.put(win, body_top + row, 0, line, attr)
+            self.list_rows.append((body_top + row, index))
+        if len(stations) > visible:
+            pos = f" {self.cursor + 1}/{len(stations)} "
+            self.put(win, body_bottom, max(0, list_width - len(pos) - 1), pos, self.c_dim)
+
+        if wide:
+            for y in range(2, body_bottom + 1):
+                self.put(win, y, list_width, "│", self.c_dim)
+            self.draw_details(win, 3, list_width + 3, width - list_width - 4, status, prog, compact=False)
+
+        self.put(win, height - 2, 0, "─" * width, self.c_dim)
+        if error:
+            self.put(win, height - 1, 1, "! " + error, self.c_error | curses.A_BOLD)
+        else:
+            x = 1
+            if busy:
+                self.put(win, height - 1, x, "Working… ", self.c_accent)
+                x += 9
+            for key, label in HELP:
+                chunk = f"{key} {label}   "
+                if x + len(chunk) > width:
+                    break
+                self.put(win, height - 1, x, key, self.c_accent | curses.A_BOLD)
+                self.put(win, height - 1, x + len(key) + 1, label, self.c_dim)
+                x += len(chunk)
+        win.noutrefresh()
+        curses.doupdate()
+
+    # ---- input --------------------------------------------------------------
+
+    def change_volume(self, delta):
+        with self.lock:
+            volume = int(self.status.get("volume", radio.preferences().get("volume", 60)) or 0)
+            self.status["volume"] = max(0, min(100, volume + delta))
+            target = self.status["volume"]
+        self.run_action("volume", target)
+
+    def handle_key(self, key):
+        stations = radio.STATIONS
+        if key in (ord("q"), 27):
+            return False
+        if key == ord("Q"):
+            self.stopped.set()
+            try:
+                radio.control("stop")
+            except Exception:
+                pass
+            return False
+        if key in (curses.KEY_UP, ord("k")):
+            self.cursor -= 1
+        elif key in (curses.KEY_DOWN, ord("j")):
+            self.cursor += 1
+        elif key in (curses.KEY_PPAGE,):
+            self.cursor -= 10
+        elif key in (curses.KEY_NPAGE,):
+            self.cursor += 10
+        elif key in (curses.KEY_HOME, ord("g")):
+            self.cursor = 0
+        elif key in (curses.KEY_END, ord("G")):
+            self.cursor = len(stations) - 1
+        elif key in (10, 13, curses.KEY_ENTER, ord("l")):
+            self.cursor = max(0, min(self.cursor, len(stations) - 1))
+            self.run_action("play", stations[self.cursor]["id"])
+        elif key in (ord(" "), ord("p")):
+            self.run_action("toggle")
+        elif key == ord("s"):
+            self.run_action("stop")
+        elif key in (ord("+"), ord("="), curses.KEY_RIGHT):
+            self.change_volume(VOLUME_STEP)
+        elif key in (ord("-"), ord("_"), curses.KEY_LEFT):
+            self.change_volume(-VOLUME_STEP)
+        elif key == ord("o"):
+            with self.lock:
+                page = self.status.get("page")
+            if page:
+                subprocess.Popen(["xdg-open", page], stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, start_new_session=True)
+        elif key == curses.KEY_MOUSE:
+            self.handle_mouse()
+        return True
+
+    def handle_mouse(self):
+        try:
+            _, _, y, _, state = curses.getmouse()
+        except curses.error:
+            return
+        if state & getattr(curses, "BUTTON4_PRESSED", 0):
+            self.cursor -= 1
+        elif state & getattr(curses, "BUTTON5_PRESSED", 0):
+            self.cursor += 1
+        elif state & (curses.BUTTON1_CLICKED | curses.BUTTON1_PRESSED | curses.BUTTON1_RELEASED):
+            for row, index in self.list_rows:
+                if row == y:
+                    self.cursor = index
+                    self.run_action("play", radio.STATIONS[index]["id"])
+
+    # ---- main loop ----------------------------------------------------------
+
+    def main(self, win):
+        curses.curs_set(0)
+        curses.use_default_colors()
+        palette = {"accent": curses.COLOR_CYAN, "play": curses.COLOR_GREEN,
+                   "error": curses.COLOR_RED, "dim": curses.COLOR_WHITE}
+        for number, colour in enumerate(palette.values(), start=1):
+            curses.init_pair(number, colour, -1)
+        self.c_accent, self.c_play, self.c_error = (curses.color_pair(i) for i in (1, 2, 3))
+        self.c_dim = curses.color_pair(4) | curses.A_DIM
+        curses.mousemask(curses.ALL_MOUSE_EVENTS | getattr(curses, "REPORT_MOUSE_POSITION", 0))
+        curses.mouseinterval(0)
+        win.keypad(True)
+        win.timeout(200)
+
+        try:
+            self.status = radio.control("status")
+            ids = [s["id"] for s in radio.STATIONS]
+            self.cursor = ids.index(self.status["station"]) if self.status["station"] in ids else 0
+        except Exception as exc:
+            self.error = str(exc)
+        self.programme_due.set()
+        for target in (self.worker, self.programme_worker):
+            threading.Thread(target=target, daemon=True).start()
+
+        while True:
+            self.draw(win)
+            key = win.getch()
+            if key == -1:
+                self.wake.wait(0.05)
+                self.wake.clear()
+                continue
+            if key != curses.KEY_MOUSE and key != curses.KEY_RESIZE:
+                with self.lock:
+                    if self.error:
+                        self.error = ""
+            if not self.handle_key(key):
+                break
+        self.stopped.set()
+
+
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
+        print("Usage: abc-radio\n\nInteractive ABC Radio player. Keys: " +
+              ", ".join(f"{k} {v}" for k, v in HELP) +
+              ".\nPlayback keeps going after you quit with q; use Q to stop and quit.")
+        return 0
+    if len(sys.argv) > 1:
+        # Pass-through CLI, e.g. `abc-radio play classic`, `abc-radio stop`
+        sys.argv = [sys.argv[0]] + sys.argv[1:]
+        try:
+            radio.main()
+            return 0
+        except Exception as exc:
+            print(f"abc-radio: {exc}", file=sys.stderr)
+            return 1
+    locale.setlocale(locale.LC_ALL, "")
+    os.environ.setdefault("ESCDELAY", "25")
+    curses.wrapper(App().main)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

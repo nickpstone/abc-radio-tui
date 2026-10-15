@@ -1,0 +1,116 @@
+[
+  {
+    "id": "brisbane",
+    "name": "ABC Radio Brisbane",
+    "page": "https://www.abc.net.au/listen/live/brisbane",
+    "url": "https://streaming.abc-cdn.net.au/audio/hls/localbrisbane.m3u8?source=web"
+  },
+  {
+    "id": "radionational",
+    "name": "ABC Radio National",
+    "page": "https://www.abc.net.au/listen/live/radionational",
+    "url": "https://streaming.abc-cdn.net.au/audio/hls/rnnsw.m3u8?source=web"
+  },
+  {
+    "id": "news",
+    "name": "ABC NEWS Radio",
+    "page": "https://www.abc.net.au/listen/live/news",
+    "url": "https://streaming.abc-cdn.net.au/audio/hls/newsradio.m3u8?source=web"
+  },
+  {
+    "id": "classic",
+    "name": "ABC Classic",
+    "page": "https://www.abc.net.au/listen/live/classic",
+    "url": "https://streaming.abc-cdn.net.au/audio/hls/classicnsw.m3u8?source=web"
+  },
+  {
+    "id": "jazz",
+    "name": "ABC Jazz",
+    "page": "https://www.abc.net.au/listen/live/jazz",
+    "url": "https://streaming.abc-cdn.net.au/audio/hls/abcjazz.m3u8?source=web"
+  },
+  {
+    "id": "country",
+    "name": "ABC Country",
+    "page": "https://www.abc.net.au/listen/live/country",
+    "url": "https://streaming.abc-cdn.net.au/audio/hls/abccountry.m3u8?source=web"
+  },
+  {
+    "id": "triplej",
+    "name": "triple j",
+    "page": "https://www.abc.net.au/listen/live/triplej",
+    "url": "https://streaming.abc-cdn.net.au/audio/hls/triplejnsw.m3u8?source=web"
+  },
+  {
+    "id": "doublej",
+    "name": "Double J",
+    "page": "https://www.abc.net.au/listen/live/doublej",
+    "url": "https://streaming.abc-cdn.net.au/audio/hls/doublejnsw.m3u8?source=web"
+  },
+  {
+    "id": "unearthed",
+    "name": "triple j Unearthed",
+    "page": "https://www.abc.net.au/listen/live/unearthed",
+    "url": "https://streaming.abc-cdn.net.au/audio/hls/triplejunearthed.m3u8?source=web"
+  },
+  {
+    "id": "sport",
+    "name": "ABC SPORT",
+    "page": "https://www.abc.net.au/listen/live/sport",
+    "url": "https://streaming.abc-cdn.net.au/audio/hls/sport.m3u8?source=web"
+  },
+  {
+    "id": "kidslisten",
+    "name": "ABC Kids listen",
+    "page": "https://www.abc.net.au/listen/live/kidslisten",
+    "url": "https://streaming.abc-cdn.net.au/audio/hls/abckids.m3u8?source=web"
+  },
+  {
+    "id": "sydney",
+    "name": "ABC Radio Sydney",
+    "page": "https://www.abc.net.au/listen/live/sydney",
+    "url": "https://streaming.abc-cdn.net.au/audio/hls/localsydney.m3u8?source=web"
+  },
+  {
+    "id": "melbourne",
+    "name": "ABC Radio Melbourne",
+    "page": "https://www.abc.net.au/listen/live/melbourne",
+    "url": "https://streaming.abc-cdn.net.au/audio/hls/localmelbourne.m3u8?source=web"
+  },
+  {
+    "id": "adelaide",
+    "name": "ABC Radio Adelaide",
+    "page": "https://www.abc.net.au/listen/live/adelaide",
+    "url": "https://streaming.abc-cdn.net.au/audio/hls/localadelaide.m3u8?source=web"
+  },
+  {
+    "id": "perth",
+    "name": "ABC Radio Perth",
+    "page": "https://www.abc.net.au/listen/live/perth",
+    "url": "https://streaming.abc-cdn.net.au/audio/hls/localperth.m3u8?source=web"
+  },
+  {
+    "id": "hobart",
+    "name": "ABC Radio Hobart",
+    "page": "https://www.abc.net.au/listen/live/hobart",
+    "url": "https://streaming.abc-cdn.net.au/audio/hls/localhobart.m3u8?source=web"
+  },
+  {
+    "id": "darwin",
+    "name": "ABC Radio Darwin",
+    "page": "https://www.abc.net.au/listen/live/darwin",
+    "url": "https://streaming.abc-cdn.net.au/audio/hls/localdarwin.m3u8?source=web"
+  },
+  {
+    "id": "canberra",
+    "name": "ABC Radio Canberra",
+    "page": "https://www.abc.net.au/listen/live/canberra",
+    "url": "https://streaming.abc-cdn.net.au/audio/hls/localcanberra.m3u8?source=web"
+  },
+  {
+    "id": "radioaustralia",
+    "name": "ABC Radio Australia",
+    "page": "https://www.abc.net.au/listen/live/radioaustralia",
+    "url": "https://streaming.abc-cdn.net.au/audio/hls/ramulti.m3u8?source=web"
+  }
+]
